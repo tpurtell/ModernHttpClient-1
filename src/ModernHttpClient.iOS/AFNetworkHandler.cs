@@ -82,7 +82,7 @@ namespace ModernHttpClient
                 new ConcatenatingStream(new Func<Stream>[] { 
                     () => op.ResponseData == null || op.ResponseData.Length == 0 ? Stream.Null : op.ResponseData.AsStream(),
                 },
-                true, blockingTcs.Task, () => { if (!op.IsCancelled && !op.IsFinished) op.Cancel(); }));
+                true, null, blockingTcs.Task, () => { if (!op.IsCancelled && !op.IsFinished) op.Cancel(); }));
 
             cancellationToken.Register (httpContent.Dispose);
 

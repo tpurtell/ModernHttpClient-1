@@ -13,6 +13,7 @@ namespace ModernHttpClient
         readonly CancellationTokenSource cts = new CancellationTokenSource();
         readonly Action onDispose;
         readonly AsyncLock readLock = new AsyncLock();
+        readonly Action<Exception> exceptionMapper;
 
         long position;
         bool closeStreams;
@@ -35,7 +36,7 @@ namespace ModernHttpClient
             }
         }
 
-        public ConcatenatingStream(IEnumerable<Func<Stream>> source, bool closeStreams, Task blockUntil = null, Action onDispose = null)
+        public ConcatenatingStream(IEnumerable<Func<Stream>> source, bool closeStreams, Action<Exception> exceptionMapper, Task blockUntil = null, Action onDispose = null)
         {
             if (source == null) throw new ArgumentNullException("source");
 
@@ -44,6 +45,7 @@ namespace ModernHttpClient
             this.closeStreams = closeStreams;
             this.blockUntil = blockUntil;
             this.onDispose = onDispose;
+            this.exceptionMapper = exceptionMapper;
         }
 
         public override bool CanRead { get { return true; } }
@@ -65,7 +67,16 @@ namespace ModernHttpClient
             set { if (value != this.position) throw new NotSupportedException(); }
         }
 
-        public override async Task<int> ReadAsync (byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        public override async Task<int> ReadAsync (byte[] buffer, int offset, int count, CancellationToken cancellationToken) {
+            try {
+                return await InternalReadAsync(buffer, offset, count, cancellationToken);
+            } catch(Exception e) {
+                if(exceptionMapper != null)
+                    exceptionMapper(e);
+                throw e;
+            }
+        }
+        public async Task<int> InternalReadAsync (byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
             int result = 0;
 
@@ -114,7 +125,13 @@ namespace ModernHttpClient
 
         public override int Read (byte[] buffer, int offset, int count)
         {
-            return readInternal(buffer, offset, count);
+            try {
+                return readInternal(buffer, offset, count);
+            } catch (Exception e) {
+                if(exceptionMapper != null)
+                    exceptionMapper(e);
+                throw e;
+            }
         }
 
         int readInternal(byte[] buffer, int offset, int count, CancellationToken ct = default(CancellationToken))

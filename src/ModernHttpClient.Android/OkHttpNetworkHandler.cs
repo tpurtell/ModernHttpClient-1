@@ -24,14 +24,20 @@ namespace ModernHttpClient
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             try {
-                return await JavaSendAsync(request, cancellationToken);
-            } catch(Java.Net.UnknownHostException e) {
-                throw new WebException("Name resolution failure", e, WebExceptionStatus.NameResolutionFailure, null);
-            } catch(Java.IO.IOException e) {
-                throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
+                return await InternalSendAsync(request, cancellationToken);
+            } catch(Exception e) {
+                JavaExceptionMapper(e);
+                throw e;
             }
         }
-        protected async Task<HttpResponseMessage> JavaSendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        private static void JavaExceptionMapper(Exception e)
+        {
+            if (e is Java.Net.UnknownHostException)
+                throw new WebException("Name resolution failure", e, WebExceptionStatus.NameResolutionFailure, null);
+            if (e is Java.IO.IOException)
+                throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
+        }
+        protected async Task<HttpResponseMessage> InternalSendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var java_uri = request.RequestUri.GetComponents(UriComponents.AbsoluteUri, UriFormat.UriEscaped);
             var url = new Java.Net.URL(java_uri);
@@ -64,7 +70,7 @@ namespace ModernHttpClient
                 ret.Content = new StreamContent(new ConcatenatingStream(new Func<Stream>[] {
                     () => rq.InputStream,
                     () => rq.ErrorStream ?? new MemoryStream (),
-                }, true));
+                }, true, JavaExceptionMapper));
 
                 var headers = rq.HeaderFields;
                 foreach (var k in headers.Keys) {
