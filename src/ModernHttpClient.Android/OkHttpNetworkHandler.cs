@@ -12,6 +12,7 @@ namespace ModernHttpClient
 {
     public class OkHttpNetworkHandler : HttpMessageHandler
     {
+        static readonly object xamarinLock = new object();
         readonly OkHttpClient client = new OkHttpClient();
         readonly bool throwOnCaptiveNetwork;
 
@@ -72,16 +73,21 @@ namespace ModernHttpClient
                     () => rq.ErrorStream ?? new MemoryStream (),
                 }, true, JavaExceptionMapper));
 
-                var headers = rq.HeaderFields;
-                foreach (var k in headers.Keys) {
-                    if(k == null)
-                        continue;
-                    foreach (var v in headers[k]) {
-                        ret.Headers.TryAddWithoutValidation(k, v);
-                        ret.Content.Headers.TryAddWithoutValidation(k, v);
+                //the implicit handling of Java.Lang.String => string conversion
+                //is broken badly.  effectively it is a race condition to be doing
+                //operations with identical string instances (string interning will cause this)
+                //on different threads
+                lock(xamarinLock) {
+                    var headers = rq.HeaderFields;
+                    foreach (var k in headers.Keys) {
+                        if(k == null)
+                            continue;
+                        foreach (var v in headers[k]) {
+                            ret.Headers.TryAddWithoutValidation(k, v);
+                            ret.Content.Headers.TryAddWithoutValidation(k, v);
+                        }
                     }
                 }
-
                 cancellationToken.Register (ret.Content.Dispose);
 
                 ret.RequestMessage = request;

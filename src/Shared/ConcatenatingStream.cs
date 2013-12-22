@@ -25,13 +25,14 @@ namespace ModernHttpClient
         Stream current;
         Stream Current {
             get {
-                if (current != null) return current;
-                if (iterator == null) throw new ObjectDisposedException(GetType().Name);
+                lock(this) {
+                    if (current != null) return current;
+                    if (iterator == null) throw new ObjectDisposedException(GetType().Name);
 
-                if (iterator.MoveNext()) {
-                    current = iterator.Current;
+                    if (iterator.MoveNext()) {
+                        current = iterator.Current;
+                    }
                 }
-
                 return current;
             }
         }
@@ -182,13 +183,15 @@ namespace ModernHttpClient
             if (disposing) {
                 cts.Cancel();
 
-                while (Current != null) {
-                    EndOfStream();
-                }
+                lock(this) {
+                    while (Current != null) {
+                        EndOfStream();
+                    }
 
-                iterator.Dispose();
-                iterator = null;
-                current = null;
+                    iterator.Dispose();
+                    iterator = null;
+                    current = null;
+                }
 
                 if (onDispose != null) onDispose();
             }
@@ -198,12 +201,15 @@ namespace ModernHttpClient
 
         void EndOfStream() 
         {
-            if (closeStreams && current != null) {
-                current.Close();
-                current.Dispose();
-            }
+            lock(this)
+            {
+                if (closeStreams && current != null) {
+                    current.Close();
+                    current.Dispose();
+                }
 
-            current = null;
+                current = null;
+            }
         }
     }
 }
