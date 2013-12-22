@@ -21,17 +21,21 @@ namespace ModernHttpClient
         {
             this.throwOnCaptiveNetwork = throwOnCaptiveNetwork;
         }
-
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            try {
+                return await JavaSendAsync(request, cancellationToken);
+            } catch(Java.Net.UnknownHostException e) {
+                throw new WebException("Name resolution failure", e, WebExceptionStatus.NameResolutionFailure, null);
+            } catch(Java.IO.IOException e) {
+                throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
+            }
+        }
+        protected async Task<HttpResponseMessage> JavaSendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var java_uri = request.RequestUri.GetComponents(UriComponents.AbsoluteUri, UriFormat.UriEscaped);
             var url = new Java.Net.URL(java_uri);
-            Java.Net.HttpURLConnection rq;
-            try {
-                rq = client.Open(url);
-            } catch(Java.Net.UnknownHostException e) {
-                throw new WebException("Name resolution failure", e, WebExceptionStatus.NameResolutionFailure, null);
-            }
+            var rq = client.Open(url);
             rq.RequestMethod = request.Method.Method.ToUpperInvariant();
 
             foreach (var kvp in request.Headers) { rq.SetRequestProperty(kvp.Key, kvp.Value.FirstOrDefault()); }
@@ -50,7 +54,6 @@ namespace ModernHttpClient
             return await Task.Run (() => {
                 // NB: This is the line that blocks until we have headers
                 var ret = new HttpResponseMessage((HttpStatusCode)rq.ResponseCode);
-
                 // Test to see if we're being redirected (i.e. in a captive network)
                 if (throwOnCaptiveNetwork && (url.Host != rq.URL.Host)) {
                     throw new WebException("Hostnames don't match, you are probably on a captive network");
@@ -63,14 +66,14 @@ namespace ModernHttpClient
                     () => rq.ErrorStream ?? new MemoryStream (),
                 }, true));
 
-                var keyValuePairs = rq.HeaderFields.Keys
-                    .Where(k => k != null)      // Yes, this happens. I can't even. 
-                    .SelectMany(k => rq.HeaderFields[k]
-                        .Select(val => new { Key = k, Value = val }));
-
-                foreach (var v in keyValuePairs) {
-                    ret.Headers.TryAddWithoutValidation(v.Key, v.Value);
-                    ret.Content.Headers.TryAddWithoutValidation(v.Key, v.Value);
+                var headers = rq.HeaderFields;
+                foreach (var k in headers.Keys) {
+                    if(k == null)
+                        continue;
+                    foreach (var v in headers[k]) {
+                        ret.Headers.TryAddWithoutValidation(k, v);
+                        ret.Content.Headers.TryAddWithoutValidation(k, v);
+                    }
                 }
 
                 cancellationToken.Register (ret.Content.Dispose);
