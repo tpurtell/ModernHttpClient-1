@@ -7,6 +7,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using OkHttp;
+using Java.Net;
 
 namespace ModernHttpClient
 {
@@ -38,6 +39,16 @@ namespace ModernHttpClient
             if (e is Java.IO.IOException)
                 throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
         }
+
+        static void CopyHeaders (HttpResponseMessage ret, HttpURLConnection rq)
+        {
+            var headers = Xamarin.Bug.MapToArray.GetHeaderFields (rq);
+            foreach (var e in headers) {
+                ret.Headers.TryAddWithoutValidation (e.Key, e.Value);
+                ret.Content.Headers.TryAddWithoutValidation (e.Key, e.Value);
+            }
+        }
+
         protected async Task<HttpResponseMessage> InternalSendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var java_uri = request.RequestUri.GetComponents(UriComponents.AbsoluteUri, UriFormat.UriEscaped);
@@ -58,40 +69,32 @@ namespace ModernHttpClient
                 rq.OutputStream.Close();
             }
 
-            return await Task.Run (() => {
-                // NB: This is the line that blocks until we have headers
-                var ret = new HttpResponseMessage((HttpStatusCode)rq.ResponseCode);
-                // Test to see if we're being redirected (i.e. in a captive network)
-                if (throwOnCaptiveNetwork && (url.Host != rq.URL.Host)) {
-                    throw new WebException("Hostnames don't match, you are probably on a captive network");
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-
-                ret.Content = new StreamContent(new ConcatenatingStream(new Func<Stream>[] {
-                    () => rq.InputStream,
-                    () => rq.ErrorStream ?? new MemoryStream (),
-                }, true, JavaExceptionMapper));
-
-                //the implicit handling of Java.Lang.String => string conversion
-                //is broken badly.  effectively it is a race condition to be doing
-                //operations with identical string instances (string interning will cause this)
-                //on different threads
-                lock(xamarinLock) {
-                    var headers = rq.HeaderFields;
-                    foreach (var k in headers.Keys) {
-                        if(k == null)
-                            continue;
-                        foreach (var v in headers[k]) {
-                            ret.Headers.TryAddWithoutValidation(k, v);
-                            ret.Content.Headers.TryAddWithoutValidation(k, v);
-                        }
+            return await Task.Run<HttpResponseMessage> (() => {
+                try {
+                    // NB: This is the line that blocks until we have headers
+                    var ret = new HttpResponseMessage((HttpStatusCode)rq.ResponseCode);
+                    // Test to see if we're being redirected (i.e. in a captive network)
+                    if (throwOnCaptiveNetwork && (url.Host != rq.URL.Host)) {
+                        throw new WebException("Hostnames don't match, you are probably on a captive network");
                     }
-                }
-                cancellationToken.Register (ret.Content.Dispose);
 
-                ret.RequestMessage = request;
-                return ret;
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    ret.Content = new StreamContent(new ConcatenatingStream(new Func<Stream>[] {
+                        () => rq.InputStream,
+                        () => rq.ErrorStream ?? new MemoryStream (),
+                    }, true, JavaExceptionMapper));
+
+                    //the implicit handling of Java.Lang.String => string conversion or iterators are very broken
+                    CopyHeaders (ret, rq);
+                    cancellationToken.Register (ret.Content.Dispose);
+
+                    ret.RequestMessage = request;
+                    return ret;
+                } catch(Exception e) {
+                    JavaExceptionMapper(e);
+                    throw e;
+                }
             }, cancellationToken).ConfigureAwait(false);
         }
 
