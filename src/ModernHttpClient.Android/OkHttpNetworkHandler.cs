@@ -21,7 +21,7 @@ namespace ModernHttpClient
         public OkHttpNetworkHandler() : this(false) {}
 
         public void CloseConnections() {
-            client.ConnectionPool.EvictAll();
+            ConnectionPool.Default.EvictAll();
         }
 
         public OkHttpNetworkHandler(bool throwOnCaptiveNetwork)
