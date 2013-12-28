@@ -12,7 +12,6 @@ namespace ModernHttpClient
     {
         readonly CancellationTokenSource cts = new CancellationTokenSource();
         readonly Action onDispose;
-        readonly AsyncLock readLock = new AsyncLock();
         readonly Action<Exception> exceptionMapper;
 
         long position;
@@ -97,14 +96,7 @@ namespace ModernHttpClient
                 Stream stream = Current;
                 if (stream == null) break;
 
-                var thisCount = default(int);
-                #if UIKIT
-                using (await readLock.LockAsync()) {
-                    thisCount = await stream.ReadAsync(buffer, offset, count);
-                }
-                #else
-                thisCount = await stream.ReadAsync(buffer, offset, count);
-                #endif
+                var thisCount = await stream.ReadAsync(buffer, offset, count);
 
                 result += thisCount;
                 count -= thisCount;
@@ -155,14 +147,7 @@ namespace ModernHttpClient
                 Stream stream = Current;
                 if (stream == null) break;
 
-                var thisCount = default(int);
-                #if UIKIT
-                using (readLock.LockAsync().Result) {
-                    thisCount = stream.Read(buffer, offset, count);
-                }
-                #else
-                thisCount = stream.Read(buffer, offset, count);
-                #endif
+                var thisCount = stream.Read(buffer, offset, count);
 
                 result += thisCount;
                 count -= thisCount;

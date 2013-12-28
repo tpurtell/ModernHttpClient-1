@@ -8,6 +8,7 @@ using System.Net;
 using System.Net.Http;
 using OkHttp;
 using Java.Net;
+using Java.IO;
 
 namespace ModernHttpClient
 {
@@ -36,12 +37,16 @@ namespace ModernHttpClient
                 throw e;
             }
         }
-        private static void JavaExceptionMapper(Exception e)
+        private void JavaExceptionMapper(Exception e)
         {
             if (e is Java.Net.UnknownHostException)
                 throw new WebException("Name resolution failure", e, WebExceptionStatus.NameResolutionFailure, null);
-            if (e is Java.IO.IOException)
+            if (e is Java.IO.IOException) {
+                var msg = e.ToString();
+                if(msg.Contains("Hostname") && msg.Contains("was not verified"))
+                    CloseConnections();
                 throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
+            }
         }
 
         static void CopyHeaders (HttpResponseMessage ret, HttpURLConnection rq)
@@ -85,7 +90,13 @@ namespace ModernHttpClient
                     cancellationToken.ThrowIfCancellationRequested();
 
                     ret.Content = new StreamContent(new ConcatenatingStream(new Func<Stream>[] {
-                        () => rq.InputStream,
+                        () => {
+                            try {
+                                return rq.InputStream;
+                            } catch(Java.IO.FileNotFoundException e) {
+                                return new MemoryStream();
+                            }
+                        },
                         () => rq.ErrorStream ?? new MemoryStream (),
                     }, true, JavaExceptionMapper));
 
