@@ -14,9 +14,21 @@ namespace ModernHttpClient
 {
     public class AFNetworkHandler : HttpMessageHandler
     {
-        static Dictionary<NSMutableUrlRequest, object[]> pins = new Dictionary<NSMutableUrlRequest, object[]>();
-
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            try {
+                return await InternalSendAsync(request, cancellationToken);
+            } catch(Exception e) {
+                IosExceptionMapper(e);
+                throw e;
+            }
+        }
+        private void IosExceptionMapper(Exception e)
+        {
+            //just map everything to a temporary exception
+            throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
+        }
+        protected async Task<HttpResponseMessage> InternalSendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var headers = request.Headers as IEnumerable<KeyValuePair<string, IEnumerable<string>>>;
             var ms = new MemoryStream();
@@ -42,10 +54,6 @@ namespace ModernHttpClient
             var op = default(AFHTTPRequestOperation);
             var err = default(NSError);
             var handler = new AFHTTPClient(new NSUrl(host));
-
-            // NB: I have no idea how async methods affects object lifetime and
-            // GC'ing of local variables, soooooooo....
-            lock (pins) { pins[rq] = new object[] { op, handler, }; }
 
             var blockingTcs = new TaskCompletionSource<bool>();
             var ret= default(HttpResponseMessage);
@@ -74,7 +82,6 @@ namespace ModernHttpClient
             }
 
             if (op.IsCancelled) {
-                lock (pins) { pins.Remove(rq); }
                 throw new TaskCanceledException();
             }
 
@@ -82,7 +89,7 @@ namespace ModernHttpClient
                 new ConcatenatingStream(new Func<Stream>[] { 
                     () => op.ResponseData == null || op.ResponseData.Length == 0 ? Stream.Null : op.ResponseData.AsStream(),
                 },
-                true, null, blockingTcs.Task, () => { if (!op.IsCancelled && !op.IsFinished) op.Cancel(); }));
+                true, IosExceptionMapper, blockingTcs.Task, () => { if (!op.IsCancelled && !op.IsFinished) op.Cancel(); }));
 
             cancellationToken.Register (httpContent.Dispose);
 
@@ -97,7 +104,6 @@ namespace ModernHttpClient
                 ret.Content.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
             }
 
-            lock (pins) { pins.Remove(rq); }
             return ret;
         }
 
