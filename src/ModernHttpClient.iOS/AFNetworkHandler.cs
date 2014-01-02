@@ -10,6 +10,7 @@ using MonoTouch.Foundation;
 using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
+using MonoTouch.UIKit;
 
 namespace ModernHttpClient
 {
@@ -46,7 +47,6 @@ namespace ModernHttpClient
             }
 
             var rq = new NSMutableUrlRequest() {
-                AllowsCellularAccess = true,
                 Body = NSData.FromArray(ms.ToArray()),
                 CachePolicy = NSUrlRequestCachePolicy.UseProtocolCachePolicy,
                 Headers = headers.Aggregate(new NSMutableDictionary(), (acc, x) => {
@@ -56,6 +56,8 @@ namespace ModernHttpClient
                 HttpMethod = request.Method.ToString().ToUpperInvariant(),
                 Url = NSUrl.FromString(request.RequestUri.AbsoluteUri),
             };
+            if(UIDevice.CurrentDevice.CheckSystemVersion (6, 0))
+                rq.AllowsCellularAccess = true;
             var tcs = new TaskCompletionSource<HttpResponseMessage>();
             var operation = new AFHTTPRequestOperation(rq);
             AFHttpRequestSuccessCallback completion = (op, response) => {
