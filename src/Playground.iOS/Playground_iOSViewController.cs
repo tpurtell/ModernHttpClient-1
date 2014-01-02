@@ -28,7 +28,7 @@ namespace Playground.iOS
 
         async partial void doIt (MonoTouch.Foundation.NSObject sender)
         {
-            var client = new HttpClient(new AFNetworkHandler());
+            var client = new HttpClient(new AFNetworkHandler("http://127.0.0.1/"));
             currentToken = new CancellationTokenSource();
             var st = new Stopwatch();
 

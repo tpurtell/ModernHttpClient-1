@@ -19,6 +19,7 @@ namespace ModernHttpClient
 
         public AFNetworkHandler(string baseUrl) {
             SharedClient = new AFHTTPClient(NSUrl.FromString(baseUrl));
+            AFHTTPRequestOperation.AddAcceptableStatusCodes(NSIndexSet.FromNSRange(new NSRange(100, 599)));
         }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -56,18 +57,9 @@ namespace ModernHttpClient
                 Url = NSUrl.FromString(request.RequestUri.AbsoluteUri),
             };
             var tcs = new TaskCompletionSource<HttpResponseMessage>();
-
-            var op = new AFHTTPRequestOperation(rq);
-            Action completion = () => {
+            var operation = new AFHTTPRequestOperation(rq);
+            AFHttpRequestSuccessCallback completion = (op, response) => {
                 try {
-                    if(op.Error != null) 
-                    {
-                        if(op.Error.Domain == NSError.NSUrlErrorDomain)
-                            tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.NameResolutionFailure));
-                        else
-                            tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.ConnectFailure));
-                        return;
-                    }
                     var resp = (NSHttpUrlResponse)op.Response;
                     var msg = new HttpResponseMessage((HttpStatusCode)resp.StatusCode) {
                         Content = new StreamContent(ToMemoryStream(op.ResponseData)),
@@ -82,14 +74,30 @@ namespace ModernHttpClient
                     tcs.SetException(new WebException(string.Format("Strange request for {0}: {1}", request.RequestUri.AbsoluteUri, e)));
                 }
             };
+            AFHttpRequestFailureCallback failure = (op, error) => {
+                try {
+                    if(error.Domain == NSError.NSUrlErrorDomain)
+                        tcs.SetException(new WebException (error.LocalizedDescription, WebExceptionStatus.NameResolutionFailure));
+                    else
+                        tcs.SetException(new WebException (error.LocalizedDescription, WebExceptionStatus.ConnectFailure));
+                } catch (Exception e) {
+                    tcs.SetException(new WebException(string.Format("Strange request for {0}: {1}", request.RequestUri.AbsoluteUri, e)));
+                }
+            };
 
-            op.SetCompletionBlock(completion);
+            operation.SetCompletionBlockWithSuccess(completion, failure);
 
-            SharedClient.EnqueueHTTPRequestOperation(op);
+            SharedClient.EnqueueHTTPRequestOperation(operation);
 
-            var http_response = await tcs.Task;
-            op.Dispose();
-            return http_response;
+            try {
+                var http_response = await tcs.Task;
+                return http_response;
+            } catch (Exception e) {
+                Console.WriteLine("failed response {0}", e);
+                throw;
+            } finally {
+                operation.Dispose();
+            }
         }
         static MemoryStream ToMemoryStream (NSData data)
         {
