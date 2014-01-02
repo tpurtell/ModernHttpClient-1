@@ -14,6 +14,11 @@ namespace ModernHttpClient
 {
     public class AFNetworkHandler : HttpMessageHandler
     {
+        public AFHTTPClient SharedClient { get; private set; }
+
+        public AFNetworkHandler(string baseUrl) {
+            SharedClient = new AFHTTPClient(NSUrl.FromString(baseUrl));
+        }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             try {
@@ -49,11 +54,6 @@ namespace ModernHttpClient
                 HttpMethod = request.Method.ToString().ToUpperInvariant(),
                 Url = NSUrl.FromString(request.RequestUri.AbsoluteUri),
             };
-
-            var host = request.RequestUri.GetLeftPart(UriPartial.Authority);
-            var handler = new AFHTTPClient(new NSUrl(host));
-
-
             var tcs = new TaskCompletionSource<HttpResponseMessage>();
 
             var op = new AFHTTPRequestOperation(rq);
@@ -79,7 +79,7 @@ namespace ModernHttpClient
                 tcs.SetResult(msg);
             });
 
-            handler.EnqueueHTTPRequestOperation(op);
+            SharedClient.EnqueueHTTPRequestOperation(op);
 
             var http_response = await tcs.Task;
             op.Dispose();
