@@ -9,6 +9,7 @@ using AFNetworking;
 using MonoTouch.Foundation;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 
 namespace ModernHttpClient
 {
@@ -57,27 +58,32 @@ namespace ModernHttpClient
             var tcs = new TaskCompletionSource<HttpResponseMessage>();
 
             var op = new AFHTTPRequestOperation(rq);
+            Action completion = () => {
+                try {
+                    if(op.Error != null) 
+                    {
+                        if(op.Error.Domain == NSError.NSUrlErrorDomain)
+                            tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.NameResolutionFailure));
+                        else
+                            tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.ConnectFailure));
+                        return;
+                    }
+                    var resp = (NSHttpUrlResponse)op.Response;
+                    var msg = new HttpResponseMessage((HttpStatusCode)resp.StatusCode) {
+                        Content = new StreamContent(ToMemoryStream(op.ResponseData)),
+                        RequestMessage = request
+                    };
+                    foreach(var v in resp.AllHeaderFields) {
+                        msg.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
+                        msg.Content.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
+                    }
+                    tcs.SetResult(msg);
+                } catch (Exception e) {
+                    tcs.SetException(new WebException(string.Format("Strange request for {0}: {1}", request.RequestUri.AbsoluteUri, e)));
+                }
+            };
 
-            op.SetCompletionBlock(() => {
-                if(op.Error != null) 
-                {
-                    if(op.Error.Domain == NSError.NSUrlErrorDomain)
-                        tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.NameResolutionFailure));
-                    else
-                        tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.ConnectFailure));
-                    return;
-                }
-                var resp = (NSHttpUrlResponse)op.Response;
-                var msg = new HttpResponseMessage((HttpStatusCode)resp.StatusCode) {
-                    Content = new StreamContent(ToMemoryStream(op.ResponseData)),
-                    RequestMessage = request
-                };
-                foreach(var v in resp.AllHeaderFields) {
-                    msg.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
-                    msg.Content.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
-                }
-                tcs.SetResult(msg);
-            });
+            op.SetCompletionBlock(completion);
 
             SharedClient.EnqueueHTTPRequestOperation(op);
 
