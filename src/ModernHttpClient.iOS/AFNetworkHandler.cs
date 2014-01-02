@@ -55,11 +55,15 @@ namespace ModernHttpClient
             var err = default(NSError);
             var handler = new AFHTTPClient(new NSUrl(host));
 
-            var blockingTcs = new TaskCompletionSource<bool>();
+            var blockingTcs = new TaskCompletionSource<Stream>();
             var ret= default(HttpResponseMessage);
 
+            //responseData field is only valid during the callback.  after that the connection and buffer
+            //are reused.  we either need to map through an nsoutputstream or copy the data.
+            //i will do an nsoutputstream style thing later, but its somewhat tricky as .net lacks
+            //anything like a PipeStream that doesn't consume a file descriptor and fully supports Async.
             try {
-                op = await enqueueOperation(handler, new AFHTTPRequestOperation(rq), cancellationToken, () => blockingTcs.SetResult(true), ex => {
+                op = await enqueueOperation(handler, new AFHTTPRequestOperation(rq), cancellationToken, (s) => blockingTcs.SetResult(s), ex => {
                     if (ex is ApplicationException) {
                         err = (NSError)ex.Data["err"];
                     }
@@ -85,13 +89,7 @@ namespace ModernHttpClient
                 throw new TaskCanceledException();
             }
 
-            var httpContent = new StreamContent (
-                new ConcatenatingStream(new Func<Stream>[] { 
-                    () => op.ResponseData == null || op.ResponseData.Length == 0 ? Stream.Null : op.ResponseData.AsStream(),
-                },
-                true, IosExceptionMapper, blockingTcs.Task, () => { if (!op.IsCancelled && !op.IsFinished) op.Cancel(); }));
-
-            cancellationToken.Register (httpContent.Dispose);
+            var httpContent = new StreamContent (await blockingTcs.Task);
 
             ret = new HttpResponseMessage((HttpStatusCode)resp.StatusCode) {
                 Content = httpContent,
@@ -107,7 +105,18 @@ namespace ModernHttpClient
             return ret;
         }
 
-        Task<AFHTTPRequestOperation> enqueueOperation(AFHTTPClient handler, AFHTTPRequestOperation operation, CancellationToken cancelToken, Action onCompleted, Action<Exception> onError)
+        static MemoryStream ToMemoryStream (NSData data)
+        {
+            if(data == null)
+                return new MemoryStream();
+            byte[] bytes = new byte[data.Length];
+
+            System.Runtime.InteropServices.Marshal.Copy(data.Bytes, bytes, 0, Convert.ToInt32(data.Length));
+
+            return new MemoryStream(bytes);
+        }
+
+        Task<AFHTTPRequestOperation> enqueueOperation(AFHTTPClient handler, AFHTTPRequestOperation operation, CancellationToken cancelToken, Action<Stream> onCompleted, Action<Exception> onError)
         {
             var tcs = new TaskCompletionSource<AFHTTPRequestOperation>();
             if (cancelToken.IsCancellationRequested) {
@@ -134,14 +143,14 @@ namespace ModernHttpClient
                         tcs.SetResult(operation);
                     }
 
-                    onCompleted();
+                    onCompleted(ToMemoryStream(op.ResponseData));
                 },
                 (op, err) => {
                     var ex = new ApplicationException();
                     ex.Data.Add("op", op);
                     ex.Data.Add("err", err);
 
-                    onCompleted();
+                    onCompleted(ToMemoryStream(op.ResponseData));
                     if (completed) {
                         onError(ex);
                         return;
