@@ -107,7 +107,7 @@ namespace ModernHttpClient
 
         static MemoryStream ToMemoryStream (NSData data)
         {
-            if(data == null)
+            if(data == null || data.Length == 0 || data.Bytes == IntPtr.Zero)
                 return new MemoryStream();
             byte[] bytes = new byte[data.Length];
 
