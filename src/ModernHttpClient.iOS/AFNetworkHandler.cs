@@ -51,60 +51,40 @@ namespace ModernHttpClient
             };
 
             var host = request.RequestUri.GetLeftPart(UriPartial.Authority);
-            var op = default(AFHTTPRequestOperation);
-            var err = default(NSError);
             var handler = new AFHTTPClient(new NSUrl(host));
 
-            var blockingTcs = new TaskCompletionSource<Stream>();
-            var ret= default(HttpResponseMessage);
 
-            //responseData field is only valid during the callback.  after that the connection and buffer
-            //are reused.  we either need to map through an nsoutputstream or copy the data.
-            //i will do an nsoutputstream style thing later, but its somewhat tricky as .net lacks
-            //anything like a PipeStream that doesn't consume a file descriptor and fully supports Async.
-            try {
-                op = await enqueueOperation(handler, new AFHTTPRequestOperation(rq), cancellationToken, (s) => blockingTcs.SetResult(s), ex => {
-                    if (ex is ApplicationException) {
-                        err = (NSError)ex.Data["err"];
-                    }
+            var tcs = new TaskCompletionSource<HttpResponseMessage>();
 
-                    if (ret == null) {
-                        return;
-                    }
+            var op = new AFHTTPRequestOperation(rq);
 
-                    ret.ReasonPhrase = (err != null ? err.LocalizedDescription : null);
-                });
-            } catch (ApplicationException ex) {
-                op = (AFHTTPRequestOperation)ex.Data["op"];
-                err = (NSError)ex.Data["err"];
-            }
+            op.SetCompletionBlock(() => {
+                if(op.Error != null) 
+                {
+                    if(op.Error.Domain == NSError.NSUrlErrorDomain)
+                        tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.NameResolutionFailure));
+                    else
+                        tcs.SetException(new WebException (op.Error.LocalizedDescription, WebExceptionStatus.ConnectFailure));
+                    return;
+                }
+                var resp = (NSHttpUrlResponse)op.Response;
+                var msg = new HttpResponseMessage((HttpStatusCode)resp.StatusCode) {
+                    Content = new StreamContent(ToMemoryStream(op.ResponseData)),
+                    RequestMessage = request
+                };
+                foreach(var v in resp.AllHeaderFields) {
+                    msg.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
+                    msg.Content.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
+                }
+                tcs.SetResult(msg);
+            });
 
-            var resp = (NSHttpUrlResponse)op.Response;
+            handler.EnqueueHTTPRequestOperation(op);
 
-            if (err != null && resp == null && err.Domain == NSError.NSUrlErrorDomain) {
-                throw new WebException (err.LocalizedDescription, WebExceptionStatus.NameResolutionFailure);
-            }
-
-            if (op.IsCancelled) {
-                throw new TaskCanceledException();
-            }
-
-            var httpContent = new StreamContent (await blockingTcs.Task);
-
-            ret = new HttpResponseMessage((HttpStatusCode)resp.StatusCode) {
-                Content = httpContent,
-                RequestMessage = request,
-                ReasonPhrase = (err != null ? err.LocalizedDescription : null),
-            };
-
-            foreach(var v in resp.AllHeaderFields) {
-                ret.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
-                ret.Content.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
-            }
-
-            return ret;
+            var http_response = await tcs.Task;
+            op.Dispose();
+            return http_response;
         }
-
         static MemoryStream ToMemoryStream (NSData data)
         {
             if(data == null || data.Length == 0 || data.Bytes == IntPtr.Zero)
@@ -114,63 +94,6 @@ namespace ModernHttpClient
             System.Runtime.InteropServices.Marshal.Copy(data.Bytes, bytes, 0, Convert.ToInt32(data.Length));
 
             return new MemoryStream(bytes);
-        }
-
-        Task<AFHTTPRequestOperation> enqueueOperation(AFHTTPClient handler, AFHTTPRequestOperation operation, CancellationToken cancelToken, Action<Stream> onCompleted, Action<Exception> onError)
-        {
-            var tcs = new TaskCompletionSource<AFHTTPRequestOperation>();
-            if (cancelToken.IsCancellationRequested) {
-                tcs.SetCanceled();
-                return tcs.Task;
-            }
-
-            bool completed = false;
-
-            operation.SetDownloadProgressBlock((a, b, c) => {
-                // NB: We're totally cheating here, we just happen to know
-                // that we're guaranteed to have response headers after the
-                // first time we get progress.
-                if (completed) return;
-
-                completed = true;
-                tcs.SetResult(operation);
-            });
-
-            operation.SetCompletionBlockWithSuccess(
-                (op, _) => {
-                    if (!completed) {
-                        completed = true;
-                        tcs.SetResult(operation);
-                    }
-
-                    onCompleted(ToMemoryStream(op.ResponseData));
-                },
-                (op, err) => {
-                    var ex = new ApplicationException();
-                    ex.Data.Add("op", op);
-                    ex.Data.Add("err", err);
-
-                    onCompleted(ToMemoryStream(op.ResponseData));
-                    if (completed) {
-                        onError(ex);
-                        return;
-                    }
-
-                    // NB: Secret Handshake is Secret
-                    completed = true;
-                    tcs.SetException(ex);
-                });
-
-            handler.EnqueueHTTPRequestOperation(operation);
-            cancelToken.Register(() => {
-                if (completed) return;
-
-                completed = true;
-                operation.Cancel();
-                tcs.SetCanceled();
-            });
-
-            return tcs.Task;
         }
     }
 }
