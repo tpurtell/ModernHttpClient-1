@@ -25,6 +25,7 @@ namespace Playground.Android
         {
             base.OnCreate (bundle);
 
+            var handler = new OkHttpNetworkHandler();
             // Set our view from the "main" layout resource
             SetContentView (Resource.Layout.Main);
 
@@ -40,11 +41,12 @@ namespace Playground.Android
             cancel.Click += (o, e) => {
                 Console.WriteLine("Canceled token {0:x8}", this.currentToken.Token.GetHashCode());
                 this.currentToken.Cancel();
+                Task.Run(() => handler.CloseConnections());
                 if (resp != null) resp.Content.Dispose();
             };
 
             button.Click += async (o, e) => {
-                var client = new HttpClient(new OkHttpNetworkHandler());
+                var client = new HttpClient(handler);
                 currentToken = new CancellationTokenSource();
                 var st = new Stopwatch();
 
