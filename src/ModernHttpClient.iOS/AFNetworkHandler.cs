@@ -71,19 +71,19 @@ namespace ModernHttpClient
                         msg.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
                         msg.Content.Headers.TryAddWithoutValidation(v.Key.ToString(), v.Value.ToString());
                     }
-                    tcs.SetResult(msg);
+                    tcs.TrySetResult(msg);
                 } catch (Exception e) {
-                    tcs.SetException(new WebException(string.Format("Strange request for {0}: {1}", request.RequestUri.AbsoluteUri, e)));
+                    tcs.TrySetException(new WebException(string.Format("Strange request for {0}: {1}", request.RequestUri.AbsoluteUri, e)));
                 }
             };
             AFHttpRequestFailureCallback failure = (op, error) => {
                 try {
                     if(error.Domain == NSError.NSUrlErrorDomain)
-                        tcs.SetException(new WebException (error.LocalizedDescription, WebExceptionStatus.NameResolutionFailure));
+                        tcs.TrySetException(new WebException (error.LocalizedDescription, WebExceptionStatus.NameResolutionFailure));
                     else
-                        tcs.SetException(new WebException (error.LocalizedDescription, WebExceptionStatus.ConnectFailure));
+                        tcs.TrySetException(new WebException (error.LocalizedDescription, WebExceptionStatus.ConnectFailure));
                 } catch (Exception e) {
-                    tcs.SetException(new WebException(string.Format("Strange request for {0}: {1}", request.RequestUri.AbsoluteUri, e)));
+                    tcs.TrySetException(new WebException(string.Format("Strange request for {0}: {1}", request.RequestUri.AbsoluteUri, e)));
                 }
             };
 
