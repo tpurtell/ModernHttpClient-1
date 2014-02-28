@@ -9,6 +9,8 @@ using System.Net.Http;
 using OkHttp;
 using Java.Net;
 using Java.IO;
+using Javax.Net.Ssl;
+using Java.Security;
 
 namespace ModernHttpClient
 {
@@ -18,7 +20,16 @@ namespace ModernHttpClient
         readonly OkHttpClient client = new OkHttpClient();
         readonly bool throwOnCaptiveNetwork;
 
-        public OkHttpNetworkHandler() : this(false) {}
+        public OkHttpNetworkHandler() : this(false) {
+            try {
+                var ssl = SSLContext.GetInstance("TLS");
+                ssl.Init(null, null, null);
+                client.SetSslSocketFactory(ssl.SocketFactory);
+            } catch (GeneralSecurityException e) {
+                // The system has no TLS. Just give up.
+            }
+
+        }
 
         public void CloseConnections() {
             ConnectionPool.Default.EvictAll();
