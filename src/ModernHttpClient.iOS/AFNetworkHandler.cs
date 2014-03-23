@@ -36,6 +36,7 @@ namespace ModernHttpClient
             //just map everything to a temporary exception
             throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
         }
+        private HashSet<TaskCompletionSource<HttpResponseMessage>> _Pending = new HashSet<TaskCompletionSource<HttpResponseMessage>>();
         protected async Task<HttpResponseMessage> InternalSendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var headers = request.Headers as IEnumerable<KeyValuePair<string, IEnumerable<string>>>;
@@ -91,6 +92,14 @@ namespace ModernHttpClient
 
             SharedClient.EnqueueHTTPRequestOperation(operation);
 
+            //Theory => 
+            // - AF networking holds only a weak reference to the blocks
+            // - await makes the tcs.Task reference the auto generated completion block
+            // - tcs is unreferenced, so it is GCed, meaning the awaiter structure is GCed
+            // - if just the right GC happens, junk await callbacks come to life. causin a complete
+            //   block in one of the enclosing asyncs to restart in a random state
+            lock(_Pending)
+                _Pending.Add(tcs);
             try {
                 var http_response = await tcs.Task;
                 return http_response;
@@ -98,6 +107,8 @@ namespace ModernHttpClient
                 Console.WriteLine("failed response {0}", e);
                 throw;
             } finally {
+                lock(_Pending)
+                    _Pending.Remove(tcs);
                 operation.Dispose();
             }
         }
