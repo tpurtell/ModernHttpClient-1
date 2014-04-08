@@ -36,7 +36,7 @@ namespace ModernHttpClient
             //just map everything to a temporary exception
             throw new WebException("IO Exception", e, WebExceptionStatus.ConnectFailure, null);
         }
-        private HashSet<TaskCompletionSource<object>> _Pending = new HashSet<TaskCompletionSource<object>>();
+        private HashSet<object> _Pending = new HashSet<object>();
         protected async Task<HttpResponseMessage> InternalSendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var headers = request.Headers as IEnumerable<KeyValuePair<string, IEnumerable<string>>>;
