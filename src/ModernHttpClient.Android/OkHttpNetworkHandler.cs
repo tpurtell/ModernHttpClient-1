@@ -62,10 +62,14 @@ namespace ModernHttpClient
 
         static void CopyHeaders (HttpResponseMessage ret, HttpURLConnection rq)
         {
-            var headers = Xamarin.Bug.MapToArray.GetHeaderFields (rq);
-            foreach (var e in headers) {
-                ret.Headers.TryAddWithoutValidation (e.Key, e.Value);
-                ret.Content.Headers.TryAddWithoutValidation (e.Key, e.Value);
+            var headers = rq.HeaderFields;
+            foreach (var k in headers.Keys) {
+                if(k == null)
+                    continue;
+                foreach (var v in headers[k]) {
+                    ret.Headers.TryAddWithoutValidation(k, v);
+                    ret.Content.Headers.TryAddWithoutValidation(k, v);
+                }
             }
         }
 
@@ -82,11 +86,14 @@ namespace ModernHttpClient
                 foreach (var kvp in request.Content.Headers) { rq.SetRequestProperty (kvp.Key, kvp.Value.FirstOrDefault ()); }
 
                 await Task.Run(async () => {
-                    var contentStream = await request.Content.ReadAsStreamAsync().ConfigureAwait(false);
-                    await copyToAsync(contentStream, rq.OutputStream, cancellationToken).ConfigureAwait(false);
+                    try {
+                        using(var contentStream = await request.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                            await copyToAsync(contentStream, rq.OutputStream, cancellationToken).ConfigureAwait(false);
+                    } finally {
+                        rq.OutputStream.Close();
+                    }
                 }, cancellationToken).ConfigureAwait(false);
 
-                rq.OutputStream.Close();
             }
 
             return await Task.Run<HttpResponseMessage> (() => {
